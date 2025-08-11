@@ -105,7 +105,7 @@
                     actionsHtml = `<button class="mark-done-btn" data-id="${task.id}">Я сделал!</button>`;
                 } else if (task.status === 'pending') {
                     if (currentUser && currentUser.id === task.creator_id) {
-                        actionsHtml = `<button class="confirm-btn" data-id="${task.id}" data-points="${task.points}" data-performer-id="${task.performer_id}">Подтвердить</button>`;
+                        actionsHtml = `<button class="confirm-btn" data-id="${task.id}" data-points="${task.points}" data-performer-id="${task.performer_id}" data-performer-name="${task.performer_name}">Подтвердить</button>`;
                     }
                     actionsHtml += `<div class="info-text">Выполняет: ${task.performer_name || '...'}</div>`;
                 } else {
@@ -156,12 +156,17 @@
             } else if (target.classList.contains('confirm-btn')) {
                 const points = parseInt(target.dataset.points);
                 const performerId = parseInt(target.dataset.performerId);
+                const performerName = target.dataset.performerName;
 
                 // Обновляем задачу
                 await supabase.from('tasks').update({ status: 'completed' }).eq('id', id);
                 
-                // Начисляем звезды (сложная операция upsert + increment)
-                await supabase.rpc('add_stars', { user_id: performerId, stars_to_add: points, user_name: 'Имя' });
+                // Начисляем звезды
+                await supabase.rpc('add_stars', { 
+                    p_user_id: performerId, 
+                    p_user_name: performerName, 
+                    p_stars_to_add: points 
+                });
             }
             
             fetchData();
