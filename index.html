@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Семейные Задачи</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 15px; background-color: var(--tg-theme-bg-color, #ffffff); color: var(--tg-theme-text-color, #000000); }
+        .container { max-width: 600px; margin: 0 auto; }
+        h1, h2 { font-size: 24px; margin-bottom: 10px; }
+        h2 { font-size: 20px; margin-top: 25px; }
+        .task-list, .stats-list { list-style: none; padding: 0; }
+        .task-item, .stats-item { background-color: var(--tg-theme-secondary-bg-color, #f1f1f1); border-radius: 10px; padding: 15px; margin-bottom: 10px; }
+        .task-item { display: flex; justify-content: space-between; align-items: center; }
+        .task-item.pending { border-left: 5px solid #ffc107; }
+        .task-item.completed { border-left: 5px solid #28a745; background-color: #f0f0f0; opacity: 0.8; }
+        button { background-color: var(--tg-theme-button-color, #007bff); color: var(--tg-theme-button-text-color, #ffffff); border: none; padding: 8px 12px; border-radius: 5px; cursor: pointer; font-weight: bold; }
+        .confirm-btn { background-color: #28a745; }
+        .info-text { font-size: 12px; color: #6c757d; }
+        #add-task-form { background-color: var(--tg-theme-secondary-bg-color, #f1f1f1); padding: 15px; border-radius: 10px; }
+        #add-task-form input { width: 100%; padding: 10px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 5px; margin-bottom: 10px; }
+        #add-task-form button { width: 100%; padding: 12px; font-size: 16px; background-color: #5cb85c; color: white; }
+        #stats-section { display: none; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <button id="toggle-stats-btn">Показать статистику</button>
+        
+        <div id="main-section">
+            <h1>Назначить задачу</h1>
+            <form id="add-task-form">
+                <input type="text" id="task-text" placeholder="Название задачи" required>
+                <input type="number" id="task-points" placeholder="Стоимость в баллах (⭐)" required>
+                <button type="submit">Добавить</button>
+            </form>
+
+            <h2>Активные задачи</h2>
+            <ul class="task-list" id="active-tasks"></ul>
+            <h2>Ожидают подтверждения</h2>
+            <ul class="task-list" id="pending-tasks"></ul>
+            <h2>Выполненные</h2>
+            <ul class="task-list" id="completed-tasks"></ul>
+        </div>
+
+        <div id="stats-section">
+            <h1>Статистика</h1>
+            <ul class="stats-list" id="stats-list"></ul>
+        </div>
+    </div>
+
+    <script>
+        const tg = window.Telegram.WebApp;
+        // ВАЖНО: Не забудьте заменить эту ссылку на вашу актуальную ссылку от ngrok!
+        const API_URL = 'https://your-ngrok-link-here.ngrok-free.app/api'; 
+        const currentUser = tg.initDataUnsafe.user;
+
+        const activeTasksList = document.getElementById('active-tasks');
+        const pendingTasksList = document.getElementById('pending-tasks');
+        const completedTasksList = document.getElementById('completed-tasks');
+        const form = document.getElementById('add-task-form');
+        const statsSection = document.getElementById('stats-section');
+        const mainSection = document.getElementById('main-section');
+        const toggleStatsBtn = document.getElementById('toggle-stats-btn');
+        const statsList = document.getElementById('stats-list');
+
+        async function fetchData() {
+            try {
+                const response = await fetch(`${API_URL}/getData`);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const data = await response.json();
+                renderAll(data);
+            } catch (error) {
+                tg.showAlert('Не удалось загрузить данные. Проверьте, что бэкенд и ngrok запущены, а ссылка API_URL верна. Ошибка: ' + error);
+            }
+        }
+        
+        function renderAll(data) {
+            activeTasksList.innerHTML = '';
+            pendingTasksList.innerHTML = '';
+            completedTasksList.innerHTML = '';
+            statsList.innerHTML = '';
+
+            data.tasks.forEach(task => {
+                const taskElement = document.createElement('li');
+                taskElement.className = 'task-item';
+                taskElement.classList.add(task.status);
+
+                let actionsHtml = '';
+                if (task.status === 'active') {
+                    actionsHtml = `<button class="mark-done-btn" data-id="${task.id}">Я сделал!</button>`;
+                } else if (task.status === 'pending') {
+                    if (currentUser && currentUser.id === task.creator_id) {
+                        actionsHtml = `<button class="confirm-btn" data-id="${task.id}">Подтвердить</button>`;
+                    }
+                    actionsHtml += `<div class="info-text">Выполняет: ${task.performer_name || '...'}</div>`;
+                } else {
+                    actionsHtml = `<div class="info-text">Выполнил: ${task.performer_name || '...'}</div>`;
+                }
+
+                taskElement.innerHTML = `
+                    <div>
+                        <span>${task.text} (+${task.points} ⭐)</span>
+                        <div class="info-text">Назначил: ${task.creator_name || '...'}</div>
+                    </div>
+                    <div>${actionsHtml}</div>
+                `;
+
+                if (task.status === 'active') activeTasksList.appendChild(taskElement);
+                else if (task.status === 'pending') pendingTasksList.appendChild(taskElement);
+                else completedTasksList.appendChild(taskElement);
+            });
+            
+            for (const userId in data.users) {
+                const user = data.users[userId];
+                const statsElement = document.createElement('li');
+                statsElement.className = 'stats-item';
+                statsElement.innerHTML = `<span>${user.name}</span> <strong>${user.stars} ⭐</strong>`;
+                statsList.appendChild(statsElement);
+            }
+        }
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const text = document.getElementById('task-text').value;
+            const points = parseInt(document.getElementById('task-points').value, 10);
+            if (!text || !points || !currentUser) return;
+            
+            await fetch(`${API_URL}/addTask`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ text, points, creator: currentUser })
+            });
+            form.reset();
+            fetchData();
+        });
+
+        document.body.addEventListener('click', async (e) => {
+            const target = e.target;
+            const taskId = parseInt(target.dataset.id);
+            let actionTaken = false;
+
+            if (target.classList.contains('mark-done-btn')) {
+                 await fetch(`${API_URL}/markDone`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ task_id: taskId, performer: currentUser })
+                });
+                actionTaken = true;
+            } else if (target.classList.contains('confirm-btn')) {
+                 await fetch(`${API_URL}/confirmTask`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ task_id: taskId })
+                });
+                actionTaken = true;
+            }
+            
+            if (actionTaken) {
+                fetchData();
+            }
+        });
+
+        toggleStatsBtn.addEventListener('click', () => {
+            const isStatsVisible = statsSection.style.display === 'block';
+            statsSection.style.display = isStatsVisible ? 'none' : 'block';
+            mainSection.style.display = isStatsVisible ? 'block' : 'none';
+            toggleStatsBtn.textContent = isStatsVisible ? 'Показать статистику' : 'Назад к задачам';
+        });
+
+        tg.ready();
+        fetchData();
+    </script>
+</body>
+</html>
