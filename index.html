@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Семейные Задачи</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 15px; background-color: var(--tg-theme-bg-color, #ffffff); color: var(--tg-theme-text-color, #000000); }
         .container { max-width: 600px; margin: 0 auto; }
@@ -52,10 +53,16 @@
 
     <script>
         const tg = window.Telegram.WebApp;
-        // ВАЖНО: Не забудьте заменить эту ссылку на вашу актуальную ссылку от ngrok!
-        const API_URL = 'https://your-ngrok-link-here.ngrok-free.app/api'; 
         const currentUser = tg.initDataUnsafe.user;
+        
+        // --- ▼▼▼ ВАЖНО: Вставьте сюда ваши ключи от Supabase ▼▼▼ ---
+        const SUPABASE_URL = 'ВАШ_URL_ОТ_SUPABASE'; 
+        const SUPABASE_KEY = 'ВАШ_KEY_ОТ_SUPABASE'; 
+        // --- ▲▲▲ ---
 
+        const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+        // --- Элементы на странице ---
         const activeTasksList = document.getElementById('active-tasks');
         const pendingTasksList = document.getElementById('pending-tasks');
         const completedTasksList = document.getElementById('completed-tasks');
@@ -66,61 +73,58 @@
         const statsList = document.getElementById('stats-list');
 
         async function fetchData() {
-            try {
-                const response = await fetch(`${API_URL}/getData`);
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                const data = await response.json();
-                renderAll(data);
-            } catch (error) {
-                tg.showAlert('Не удалось загрузить данные. Проверьте, что бэкенд и ngrok запущены, а ссылка API_URL верна. Ошибка: ' + error);
+            // Загружаем задачи
+            const { data: tasks, error: tasksError } = await supabase.from('tasks').select('*').order('created_at', { ascending: false });
+            if (tasksError) {
+                tg.showAlert('Ошибка загрузки задач: ' + tasksError.message);
+                return;
             }
+
+            // Загружаем статистику
+            const { data: users, error: usersError } = await supabase.from('users').select('*').order('stars', { ascending: false });
+            if (usersError) {
+                tg.showAlert('Ошибка загрузки статистики: ' + usersError.message);
+                return;
+            }
+
+            renderAll({ tasks, users });
         }
         
-        function renderAll(data) {
+        function renderAll({ tasks, users }) {
             activeTasksList.innerHTML = '';
             pendingTasksList.innerHTML = '';
             completedTasksList.innerHTML = '';
             statsList.innerHTML = '';
 
-            data.tasks.forEach(task => {
+            tasks.forEach(task => {
                 const taskElement = document.createElement('li');
-                taskElement.className = 'task-item';
-                taskElement.classList.add(task.status);
-
+                taskElement.className = 'task-item ' + task.status;
+                
                 let actionsHtml = '';
                 if (task.status === 'active') {
                     actionsHtml = `<button class="mark-done-btn" data-id="${task.id}">Я сделал!</button>`;
                 } else if (task.status === 'pending') {
                     if (currentUser && currentUser.id === task.creator_id) {
-                        actionsHtml = `<button class="confirm-btn" data-id="${task.id}">Подтвердить</button>`;
+                        actionsHtml = `<button class="confirm-btn" data-id="${task.id}" data-points="${task.points}" data-performer-id="${task.performer_id}">Подтвердить</button>`;
                     }
                     actionsHtml += `<div class="info-text">Выполняет: ${task.performer_name || '...'}</div>`;
                 } else {
-                    actionsHtml = `<div class="info-text">Выполнил: ${task.performer_name || '...'}</div>`;
+                    actionsHtml = `<div class="info-text">✅ Выполнил: ${task.performer_name || '...'}</div>`;
                 }
 
-                taskElement.innerHTML = `
-                    <div>
-                        <span>${task.text} (+${task.points} ⭐)</span>
-                        <div class="info-text">Назначил: ${task.creator_name || '...'}</div>
-                    </div>
-                    <div>${actionsHtml}</div>
-                `;
+                taskElement.innerHTML = `<div><span>${task.text} (+${task.points} ⭐)</span><div class="info-text">Назначил: ${task.creator_name || '...'}</div></div><div>${actionsHtml}</div>`;
 
                 if (task.status === 'active') activeTasksList.appendChild(taskElement);
                 else if (task.status === 'pending') pendingTasksList.appendChild(taskElement);
                 else completedTasksList.appendChild(taskElement);
             });
             
-            for (const userId in data.users) {
-                const user = data.users[userId];
+            users.forEach(user => {
                 const statsElement = document.createElement('li');
                 statsElement.className = 'stats-item';
-                statsElement.innerHTML = `<span>${user.name}</span> <strong>${user.stars} ⭐</strong>`;
+                statsElement.innerHTML = `<span>${user.name}</span> <strong>${user.stars || 0} ⭐</strong>`;
                 statsList.appendChild(statsElement);
-            }
+            });
         }
 
         form.addEventListener('submit', async (e) => {
@@ -129,10 +133,10 @@
             const points = parseInt(document.getElementById('task-points').value, 10);
             if (!text || !points || !currentUser) return;
             
-            await fetch(`${API_URL}/addTask`, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ text, points, creator: currentUser })
+            await supabase.from('tasks').insert({
+                text, points,
+                creator_id: currentUser.id,
+                creator_name: currentUser.first_name
             });
             form.reset();
             fetchData();
@@ -140,28 +144,27 @@
 
         document.body.addEventListener('click', async (e) => {
             const target = e.target;
-            const taskId = parseInt(target.dataset.id);
-            let actionTaken = false;
+            const id = parseInt(target.dataset.id);
+            if (!id) return;
 
             if (target.classList.contains('mark-done-btn')) {
-                 await fetch(`${API_URL}/markDone`, {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ task_id: taskId, performer: currentUser })
-                });
-                actionTaken = true;
+                await supabase.from('tasks').update({ 
+                    status: 'pending', 
+                    performer_id: currentUser.id,
+                    performer_name: currentUser.first_name
+                }).eq('id', id);
             } else if (target.classList.contains('confirm-btn')) {
-                 await fetch(`${API_URL}/confirmTask`, {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ task_id: taskId })
-                });
-                actionTaken = true;
+                const points = parseInt(target.dataset.points);
+                const performerId = parseInt(target.dataset.performerId);
+
+                // Обновляем задачу
+                await supabase.from('tasks').update({ status: 'completed' }).eq('id', id);
+                
+                // Начисляем звезды (сложная операция upsert + increment)
+                await supabase.rpc('add_stars', { user_id: performerId, stars_to_add: points, user_name: 'Имя' });
             }
             
-            if (actionTaken) {
-                fetchData();
-            }
+            fetchData();
         });
 
         toggleStatsBtn.addEventListener('click', () => {
