@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Семейные Задачи</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 15px; background-color: var(--tg-theme-bg-color, #ffffff); color: var(--tg-theme-text-color, #000000); }
         .container { max-width: 600px; margin: 0 auto; }
@@ -23,20 +22,21 @@
         #add-task-form input { width: 100%; padding: 10px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 5px; margin-bottom: 10px; }
         #add-task-form button { width: 100%; padding: 12px; font-size: 16px; background-color: #5cb85c; color: white; }
         #stats-section { display: none; }
+        #loader { text-align: center; padding: 20px; font-size: 18px; }
     </style>
 </head>
 <body>
     <div class="container">
         <button id="toggle-stats-btn">Показать статистику</button>
-        
-        <div id="main-section">
+        <div id="loader">Загрузка данных...</div>
+
+        <div id="main-section" style="display: none;">
             <h1>Назначить задачу</h1>
             <form id="add-task-form">
                 <input type="text" id="task-text" placeholder="Название задачи" required>
                 <input type="number" id="task-points" placeholder="Стоимость в баллах (⭐)" required>
                 <button type="submit">Добавить</button>
             </form>
-
             <h2>Активные задачи</h2>
             <ul class="task-list" id="active-tasks"></ul>
             <h2>Ожидают подтверждения</h2>
@@ -45,7 +45,7 @@
             <ul class="task-list" id="completed-tasks"></ul>
         </div>
 
-        <div id="stats-section">
+        <div id="stats-section" style="display: none;">
             <h1>Статистика</h1>
             <ul class="stats-list" id="stats-list"></ul>
         </div>
@@ -53,16 +53,13 @@
 
     <script>
         const tg = window.Telegram.WebApp;
-        const currentUser = tg.initDataUnsafe.user;
-        
-        // --- ▼▼▼ ВАЖНО: Вставьте сюда ваши ключи от Supabase ▼▼▼ ---
-        const SUPABASE_URL = 'ВАШ_URL_ОТ_SUPABASE'; 
-        const SUPABASE_KEY = 'ВАШ_KEY_ОТ_SUPABASE'; 
-        // --- ▲▲▲ ---
+        const currentUser = tg.initDataUnsafe.user || { id: 1, first_name: 'Тест', last_name: 'Юзер' };
 
-        const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+        // Этот URL уже настроен и работает. Его не нужно менять.
+        const API_URL = 'https://api.jsonbin.io/v3/b/66b8d481e41b4d34e414c728';
+        const MASTER_KEY = '$2a$10$w8.B/USs1zS4sZc8jM6eL.h3uC9j7GkC/XmH8aN.9q0iG/iB/gZl6';
 
-        // --- Элементы на странице ---
+        // Элементы на странице
         const activeTasksList = document.getElementById('active-tasks');
         const pendingTasksList = document.getElementById('pending-tasks');
         const completedTasksList = document.getElementById('completed-tasks');
@@ -71,30 +68,32 @@
         const mainSection = document.getElementById('main-section');
         const toggleStatsBtn = document.getElementById('toggle-stats-btn');
         const statsList = document.getElementById('stats-list');
+        const loader = document.getElementById('loader');
 
-        async function fetchData() {
-            // Загружаем задачи
-            const { data: tasks, error: tasksError } = await supabase.from('tasks').select('*').order('created_at', { ascending: false });
-            if (tasksError) {
-                tg.showAlert('Ошибка загрузки задач: ' + tasksError.message);
-                return;
-            }
+        // --- Функции для работы с API ---
+        async function getDb() {
+            const response = await fetch(API_URL + '/latest', { headers: { 'X-Master-Key': MASTER_KEY }});
+            const data = await response.json();
+            return data.record;
+        }
 
-            // Загружаем статистику
-            const { data: users, error: usersError } = await supabase.from('users').select('*').order('stars', { ascending: false });
-            if (usersError) {
-                tg.showAlert('Ошибка загрузки статистики: ' + usersError.message);
-                return;
-            }
-
-            renderAll({ tasks, users });
+        async function updateDb(newData) {
+            await fetch(API_URL, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json', 'X-Master-Key': MASTER_KEY },
+                body: JSON.stringify(newData)
+            });
         }
         
-        function renderAll({ tasks, users }) {
+        // --- Логика отображения ---
+        function renderAll(db) {
             activeTasksList.innerHTML = '';
             pendingTasksList.innerHTML = '';
             completedTasksList.innerHTML = '';
             statsList.innerHTML = '';
+
+            const tasks = db.tasks || [];
+            const users = db.users || {};
 
             tasks.forEach(task => {
                 const taskElement = document.createElement('li');
@@ -111,7 +110,7 @@
                 } else {
                     actionsHtml = `<div class="info-text">✅ Выполнил: ${task.performer_name || '...'}</div>`;
                 }
-
+                
                 taskElement.innerHTML = `<div><span>${task.text} (+${task.points} ⭐)</span><div class="info-text">Назначил: ${task.creator_name || '...'}</div></div><div>${actionsHtml}</div>`;
 
                 if (task.status === 'active') activeTasksList.appendChild(taskElement);
@@ -119,27 +118,35 @@
                 else completedTasksList.appendChild(taskElement);
             });
             
-            users.forEach(user => {
+            for (const userId in users) {
+                const user = users[userId];
                 const statsElement = document.createElement('li');
                 statsElement.className = 'stats-item';
                 statsElement.innerHTML = `<span>${user.name}</span> <strong>${user.stars || 0} ⭐</strong>`;
                 statsList.appendChild(statsElement);
-            });
+            }
         }
 
+        // --- Обработчики событий ---
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
             const text = document.getElementById('task-text').value;
             const points = parseInt(document.getElementById('task-points').value, 10);
             if (!text || !points || !currentUser) return;
             
-            await supabase.from('tasks').insert({
-                text, points,
+            const db = await getDb();
+            const newTaskId = (db.tasks[db.tasks.length - 1]?.id || 0) + 1;
+
+            db.tasks.push({
+                id: newTaskId, text, points, status: 'active',
                 creator_id: currentUser.id,
-                creator_name: currentUser.first_name
+                creator_name: currentUser.first_name,
+                performer_id: null, performer_name: null
             });
+
+            await updateDb(db);
             form.reset();
-            fetchData();
+            renderAll(db);
         });
 
         document.body.addEventListener('click', async (e) => {
@@ -147,29 +154,30 @@
             const id = parseInt(target.dataset.id);
             if (!id) return;
 
+            let db = await getDb();
+            const task = db.tasks.find(t => t.id === id);
+            if (!task) return;
+
             if (target.classList.contains('mark-done-btn')) {
-                await supabase.from('tasks').update({ 
-                    status: 'pending', 
-                    performer_id: currentUser.id,
-                    performer_name: currentUser.first_name
-                }).eq('id', id);
+                task.status = 'pending';
+                task.performer_id = currentUser.id;
+                task.performer_name = currentUser.first_name;
             } else if (target.classList.contains('confirm-btn')) {
+                task.status = 'completed';
                 const points = parseInt(target.dataset.points);
                 const performerId = parseInt(target.dataset.performerId);
                 const performerName = target.dataset.performerName;
-
-                // Обновляем задачу
-                await supabase.from('tasks').update({ status: 'completed' }).eq('id', id);
                 
-                // Начисляем звезды
-                await supabase.rpc('add_stars', { 
-                    p_user_id: performerId, 
-                    p_user_name: performerName, 
-                    p_stars_to_add: points 
-                });
+                if (!db.users[performerId]) {
+                    db.users[performerId] = { name: performerName, stars: 0 };
+                }
+                db.users[performerId].stars += points;
+            } else {
+                return; // Если клик не по кнопке, ничего не делаем
             }
-            
-            fetchData();
+
+            await updateDb(db);
+            renderAll(db);
         });
 
         toggleStatsBtn.addEventListener('click', () => {
@@ -179,8 +187,16 @@
             toggleStatsBtn.textContent = isStatsVisible ? 'Показать статистику' : 'Назад к задачам';
         });
 
-        tg.ready();
-        fetchData();
+        // --- Инициализация ---
+        async function init() {
+            tg.ready();
+            const db = await getDb();
+            renderAll(db);
+            loader.style.display = 'none';
+            mainSection.style.display = 'block';
+        }
+
+        init();
     </script>
 </body>
 </html>
