@@ -22,21 +22,20 @@
         #add-task-form input { width: 100%; padding: 10px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 5px; margin-bottom: 10px; }
         #add-task-form button { width: 100%; padding: 12px; font-size: 16px; background-color: #5cb85c; color: white; }
         #stats-section { display: none; }
-        #loader { text-align: center; padding: 20px; font-size: 18px; }
     </style>
 </head>
 <body>
     <div class="container">
         <button id="toggle-stats-btn">Показать статистику</button>
-        <div id="loader">Загрузка данных...</div>
-
-        <div id="main-section" style="display: none;">
+        
+        <div id="main-section">
             <h1>Назначить задачу</h1>
             <form id="add-task-form">
                 <input type="text" id="task-text" placeholder="Название задачи" required>
                 <input type="number" id="task-points" placeholder="Стоимость в баллах (⭐)" required>
                 <button type="submit">Добавить</button>
             </form>
+
             <h2>Активные задачи</h2>
             <ul class="task-list" id="active-tasks"></ul>
             <h2>Ожидают подтверждения</h2>
@@ -45,7 +44,7 @@
             <ul class="task-list" id="completed-tasks"></ul>
         </div>
 
-        <div id="stats-section" style="display: none;">
+        <div id="stats-section">
             <h1>Статистика</h1>
             <ul class="stats-list" id="stats-list"></ul>
         </div>
@@ -53,13 +52,9 @@
 
     <script>
         const tg = window.Telegram.WebApp;
-        const currentUser = tg.initDataUnsafe.user || { id: 1, first_name: 'Тест', last_name: 'Юзер' };
+        const currentUser = tg.initDataUnsafe.user || { id: 12345, first_name: 'Тест', last_name: 'Юзер' };
 
-        // Этот URL уже настроен и работает. Его не нужно менять.
-        const API_URL = 'https://api.jsonbin.io/v3/b/66b8d481e41b4d34e414c728';
-        const MASTER_KEY = '$2a$10$w8.B/USs1zS4sZc8jM6eL.h3uC9j7GkC/XmH8aN.9q0iG/iB/gZl6';
-
-        // Элементы на странице
+        // --- Элементы на странице ---
         const activeTasksList = document.getElementById('active-tasks');
         const pendingTasksList = document.getElementById('pending-tasks');
         const completedTasksList = document.getElementById('completed-tasks');
@@ -68,21 +63,19 @@
         const mainSection = document.getElementById('main-section');
         const toggleStatsBtn = document.getElementById('toggle-stats-btn');
         const statsList = document.getElementById('stats-list');
-        const loader = document.getElementById('loader');
 
-        // --- Функции для работы с API ---
-        async function getDb() {
-            const response = await fetch(API_URL + '/latest', { headers: { 'X-Master-Key': MASTER_KEY }});
-            const data = await response.json();
-            return data.record;
+        // --- Работа с локальным хранилищем ---
+        function loadDb() {
+            const dbJson = localStorage.getItem('familyTasksAppDb');
+            if (dbJson) {
+                return JSON.parse(dbJson);
+            }
+            // База данных по умолчанию, если запускается впервые
+            return { tasks: [], users: {} };
         }
 
-        async function updateDb(newData) {
-            await fetch(API_URL, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json', 'X-Master-Key': MASTER_KEY },
-                body: JSON.stringify(newData)
-            });
+        function saveDb(db) {
+            localStorage.setItem('familyTasksAppDb', JSON.stringify(db));
         }
         
         // --- Логика отображения ---
@@ -92,10 +85,7 @@
             completedTasksList.innerHTML = '';
             statsList.innerHTML = '';
 
-            const tasks = db.tasks || [];
-            const users = db.users || {};
-
-            tasks.forEach(task => {
+            db.tasks.forEach(task => {
                 const taskElement = document.createElement('li');
                 taskElement.className = 'task-item ' + task.status;
                 
@@ -103,14 +93,13 @@
                 if (task.status === 'active') {
                     actionsHtml = `<button class="mark-done-btn" data-id="${task.id}">Я сделал!</button>`;
                 } else if (task.status === 'pending') {
-                    if (currentUser && currentUser.id === task.creator_id) {
-                        actionsHtml = `<button class="confirm-btn" data-id="${task.id}" data-points="${task.points}" data-performer-id="${task.performer_id}" data-performer-name="${task.performer_name}">Подтвердить</button>`;
-                    }
+                    // В этой версии любой может подтвердить задачу для простоты
+                    actionsHtml = `<button class="confirm-btn" data-id="${task.id}" data-points="${task.points}" data-performer-id="${task.performer_id}" data-performer-name="${task.performer_name}">Подтвердить</button>`;
                     actionsHtml += `<div class="info-text">Выполняет: ${task.performer_name || '...'}</div>`;
                 } else {
                     actionsHtml = `<div class="info-text">✅ Выполнил: ${task.performer_name || '...'}</div>`;
                 }
-                
+
                 taskElement.innerHTML = `<div><span>${task.text} (+${task.points} ⭐)</span><div class="info-text">Назначил: ${task.creator_name || '...'}</div></div><div>${actionsHtml}</div>`;
 
                 if (task.status === 'active') activeTasksList.appendChild(taskElement);
@@ -118,8 +107,8 @@
                 else completedTasksList.appendChild(taskElement);
             });
             
-            for (const userId in users) {
-                const user = users[userId];
+            for (const userId in db.users) {
+                const user = db.users[userId];
                 const statsElement = document.createElement('li');
                 statsElement.className = 'stats-item';
                 statsElement.innerHTML = `<span>${user.name}</span> <strong>${user.stars || 0} ⭐</strong>`;
@@ -128,14 +117,14 @@
         }
 
         // --- Обработчики событий ---
-        form.addEventListener('submit', async (e) => {
+        form.addEventListener('submit', (e) => {
             e.preventDefault();
             const text = document.getElementById('task-text').value;
             const points = parseInt(document.getElementById('task-points').value, 10);
-            if (!text || !points || !currentUser) return;
+            if (!text || !points) return;
             
-            const db = await getDb();
-            const newTaskId = (db.tasks[db.tasks.length - 1]?.id || 0) + 1;
+            const db = loadDb();
+            const newTaskId = (db.tasks.length > 0 ? Math.max(...db.tasks.map(t => t.id)) : 0) + 1;
 
             db.tasks.push({
                 id: newTaskId, text, points, status: 'active',
@@ -143,18 +132,18 @@
                 creator_name: currentUser.first_name,
                 performer_id: null, performer_name: null
             });
-
-            await updateDb(db);
-            form.reset();
+            
+            saveDb(db);
             renderAll(db);
+            form.reset();
         });
 
-        document.body.addEventListener('click', async (e) => {
+        document.body.addEventListener('click', (e) => {
             const target = e.target;
             const id = parseInt(target.dataset.id);
             if (!id) return;
 
-            let db = await getDb();
+            const db = loadDb();
             const task = db.tasks.find(t => t.id === id);
             if (!task) return;
 
@@ -173,10 +162,10 @@
                 }
                 db.users[performerId].stars += points;
             } else {
-                return; // Если клик не по кнопке, ничего не делаем
+                return;
             }
 
-            await updateDb(db);
+            saveDb(db);
             renderAll(db);
         });
 
@@ -188,15 +177,9 @@
         });
 
         // --- Инициализация ---
-        async function init() {
-            tg.ready();
-            const db = await getDb();
-            renderAll(db);
-            loader.style.display = 'none';
-            mainSection.style.display = 'block';
-        }
-
-        init();
+        tg.ready();
+        const db = loadDb();
+        renderAll(db);
     </script>
 </body>
 </html>
