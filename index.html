@@ -1,185 +1,272 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Семейные Задачи</title>
+    <title>Задания и призы</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 15px; background-color: var(--tg-theme-bg-color, #ffffff); color: var(--tg-theme-text-color, #000000); }
-        .container { max-width: 600px; margin: 0 auto; }
-        h1, h2 { font-size: 24px; margin-bottom: 10px; }
-        h2 { font-size: 20px; margin-top: 25px; }
-        .task-list, .stats-list { list-style: none; padding: 0; }
-        .task-item, .stats-item { background-color: var(--tg-theme-secondary-bg-color, #f1f1f1); border-radius: 10px; padding: 15px; margin-bottom: 10px; }
-        .task-item { display: flex; justify-content: space-between; align-items: center; }
-        .task-item.pending { border-left: 5px solid #ffc107; }
-        .task-item.completed { border-left: 5px solid #28a745; background-color: #f0f0f0; opacity: 0.8; }
-        button { background-color: var(--tg-theme-button-color, #007bff); color: var(--tg-theme-button-text-color, #ffffff); border: none; padding: 8px 12px; border-radius: 5px; cursor: pointer; font-weight: bold; }
-        .confirm-btn { background-color: #28a745; }
-        .info-text { font-size: 12px; color: #6c757d; }
-        #add-task-form { background-color: var(--tg-theme-secondary-bg-color, #f1f1f1); padding: 15px; border-radius: 10px; }
-        #add-task-form input { width: 100%; padding: 10px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 5px; margin-bottom: 10px; }
-        #add-task-form button { width: 100%; padding: 12px; font-size: 16px; background-color: #5cb85c; color: white; }
-        #stats-section { display: none; }
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .task, .prize { border: 1px solid #ccc; padding: 10px; margin: 10px 0; }
+        .admin-panel { background: #f0f0f0; padding: 10px; }
+        button { padding: 5px 10px; margin: 5px; cursor: pointer; }
+        input, textarea { margin: 5px; padding: 5px; width: 100%; }
+        img { max-width: 100px; max-height: 100px; }
     </style>
 </head>
 <body>
-    <div class="container">
-        <button id="toggle-stats-btn">Показать статистику</button>
-        
-        <div id="main-section">
-            <h1>Назначить задачу</h1>
-            <form id="add-task-form">
-                <input type="text" id="task-text" placeholder="Название задачи" required>
-                <input type="number" id="task-points" placeholder="Стоимость в баллах (⭐)" required>
-                <button type="submit">Добавить</button>
-            </form>
+    <h1>Задания и призы</h1>
+    <h3>Баллы: <span id="points">0</span></h3>
 
-            <h2>Активные задачи</h2>
-            <ul class="task-list" id="active-tasks"></ul>
-            <h2>Ожидают подтверждения</h2>
-            <ul class="task-list" id="pending-tasks"></ul>
-            <h2>Выполненные</h2>
-            <ul class="task-list" id="completed-tasks"></ul>
-        </div>
-
-        <div id="stats-section">
-            <h1>Статистика</h1>
-            <ul class="stats-list" id="stats-list"></ul>
-        </div>
+    <!-- Админ-логин -->
+    <div id="admin-login" style="display: none;">
+        <input type="password" id="admin-password" placeholder="Пароль админа">
+        <button onclick="loginAsAdmin()">Войти</button>
     </div>
 
+    <!-- Админ-панель -->
+    <div id="admin-panel" class="admin-panel" style="display: none;">
+        <h3>Админ-панель</h3>
+        <input type="text" id="task-title" placeholder="Название задания">
+        <input type="number" id="task-points" placeholder="Баллы">
+        <button onclick="addTask()">Добавить задание</button>
+        <br>
+        <input type="text" id="prize-title" placeholder="Название приза">
+        <input type="number" id="prize-cost" placeholder="Стоимость в баллах">
+        <button onclick="addPrize()">Добавить приз</button>
+    </div>
+
+    <!-- Список заданий -->
+    <h3>Задания</h3>
+    <div id="task-list"></div>
+
+    <!-- Магазин призов -->
+    <h3>Магазин</h3>
+    <div id="prize-list"></div>
+
     <script>
+        const adminPassword = "admin123"; // Смените пароль
+        let isAdmin = false;
+        let tasks = JSON.parse(localStorage.getItem('tasks') || '[]');
+        let prizes = JSON.parse(localStorage.getItem('prizes') || '[]');
+        let points = parseInt(localStorage.getItem('points') || '0');
+        let pendingTasks = JSON.parse(localStorage.getItem('pendingTasks') || '[]');
+        let lastReset = localStorage.getItem('lastReset') || new Date().toISOString().split('T')[0];
+
+        // Начальные данные (можно редактировать)
+        if (tasks.length === 0) {
+            tasks = [
+                { id: '1', title: 'Сделать фото с логотипом канала', points: 10, completed: false, pending: false },
+                { id: '2', title: 'Написать пост о канале', points: 20, completed: false, pending: false }
+            ];
+            localStorage.setItem('tasks', JSON.stringify(tasks));
+        }
+        if (prizes.length === 0) {
+            prizes = [
+                { id: '1', title: 'Стикеры канала', cost: 30 },
+                { id: '2', title: 'Скидка 10% на мерч', cost: 50 }
+            ];
+            localStorage.setItem('prizes', JSON.stringify(prizes));
+        }
+
+        // Инициализация Telegram Web App
         const tg = window.Telegram.WebApp;
-        const currentUser = tg.initDataUnsafe.user || { id: 12345, first_name: 'Тест', last_name: 'Юзер' };
-
-        // --- Элементы на странице ---
-        const activeTasksList = document.getElementById('active-tasks');
-        const pendingTasksList = document.getElementById('pending-tasks');
-        const completedTasksList = document.getElementById('completed-tasks');
-        const form = document.getElementById('add-task-form');
-        const statsSection = document.getElementById('stats-section');
-        const mainSection = document.getElementById('main-section');
-        const toggleStatsBtn = document.getElementById('toggle-stats-btn');
-        const statsList = document.getElementById('stats-list');
-
-        // --- Работа с локальным хранилищем ---
-        function loadDb() {
-            const dbJson = localStorage.getItem('familyTasksAppDb');
-            if (dbJson) {
-                return JSON.parse(dbJson);
-            }
-            // База данных по умолчанию, если запускается впервые
-            return { tasks: [], users: {} };
-        }
-
-        function saveDb(db) {
-            localStorage.setItem('familyTasksAppDb', JSON.stringify(db));
-        }
-        
-        // --- Логика отображения ---
-        function renderAll(db) {
-            activeTasksList.innerHTML = '';
-            pendingTasksList.innerHTML = '';
-            completedTasksList.innerHTML = '';
-            statsList.innerHTML = '';
-
-            db.tasks.forEach(task => {
-                const taskElement = document.createElement('li');
-                taskElement.className = 'task-item ' + task.status;
-                
-                let actionsHtml = '';
-                if (task.status === 'active') {
-                    actionsHtml = `<button class="mark-done-btn" data-id="${task.id}">Я сделал!</button>`;
-                } else if (task.status === 'pending') {
-                    // В этой версии любой может подтвердить задачу для простоты
-                    actionsHtml = `<button class="confirm-btn" data-id="${task.id}" data-points="${task.points}" data-performer-id="${task.performer_id}" data-performer-name="${task.performer_name}">Подтвердить</button>`;
-                    actionsHtml += `<div class="info-text">Выполняет: ${task.performer_name || '...'}</div>`;
-                } else {
-                    actionsHtml = `<div class="info-text">✅ Выполнил: ${task.performer_name || '...'}</div>`;
-                }
-
-                taskElement.innerHTML = `<div><span>${task.text} (+${task.points} ⭐)</span><div class="info-text">Назначил: ${task.creator_name || '...'}</div></div><div>${actionsHtml}</div>`;
-
-                if (task.status === 'active') activeTasksList.appendChild(taskElement);
-                else if (task.status === 'pending') pendingTasksList.appendChild(taskElement);
-                else completedTasksList.appendChild(taskElement);
-            });
-            
-            for (const userId in db.users) {
-                const user = db.users[userId];
-                const statsElement = document.createElement('li');
-                statsElement.className = 'stats-item';
-                statsElement.innerHTML = `<span>${user.name}</span> <strong>${user.stars || 0} ⭐</strong>`;
-                statsList.appendChild(statsElement);
-            }
-        }
-
-        // --- Обработчики событий ---
-        form.addEventListener('submit', (e) => {
-            e.preventDefault();
-            const text = document.getElementById('task-text').value;
-            const points = parseInt(document.getElementById('task-points').value, 10);
-            if (!text || !points) return;
-            
-            const db = loadDb();
-            const newTaskId = (db.tasks.length > 0 ? Math.max(...db.tasks.map(t => t.id)) : 0) + 1;
-
-            db.tasks.push({
-                id: newTaskId, text, points, status: 'active',
-                creator_id: currentUser.id,
-                creator_name: currentUser.first_name,
-                performer_id: null, performer_name: null
-            });
-            
-            saveDb(db);
-            renderAll(db);
-            form.reset();
-        });
-
-        document.body.addEventListener('click', (e) => {
-            const target = e.target;
-            const id = parseInt(target.dataset.id);
-            if (!id) return;
-
-            const db = loadDb();
-            const task = db.tasks.find(t => t.id === id);
-            if (!task) return;
-
-            if (target.classList.contains('mark-done-btn')) {
-                task.status = 'pending';
-                task.performer_id = currentUser.id;
-                task.performer_name = currentUser.first_name;
-            } else if (target.classList.contains('confirm-btn')) {
-                task.status = 'completed';
-                const points = parseInt(target.dataset.points);
-                const performerId = parseInt(target.dataset.performerId);
-                const performerName = target.dataset.performerName;
-                
-                if (!db.users[performerId]) {
-                    db.users[performerId] = { name: performerName, stars: 0 };
-                }
-                db.users[performerId].stars += points;
-            } else {
-                return;
-            }
-
-            saveDb(db);
-            renderAll(db);
-        });
-
-        toggleStatsBtn.addEventListener('click', () => {
-            const isStatsVisible = statsSection.style.display === 'block';
-            statsSection.style.display = isStatsVisible ? 'none' : 'block';
-            mainSection.style.display = isStatsVisible ? 'block' : 'none';
-            toggleStatsBtn.textContent = isStatsVisible ? 'Показать статистику' : 'Назад к задачам';
-        });
-
-        // --- Инициализация ---
         tg.ready();
-        const db = loadDb();
-        renderAll(db);
+        tg.expand();
+
+        // Проверка сброса (раз в месяц)
+        function checkReset() {
+            const now = new Date();
+            const resetDate = new Date(lastReset);
+            const diffMonths = (now.getFullYear() - resetDate.getFullYear()) * 12 + now.getMonth() - resetDate.getMonth();
+            if (diffMonths >= 1) {
+                tasks = tasks.map(task => ({ ...task, completed: false, pending: false }));
+                points = 0;
+                pendingTasks = [];
+                localStorage.setItem('tasks', JSON.stringify(tasks));
+                localStorage.setItem('points', points);
+                localStorage.setItem('pendingTasks', JSON.stringify(pendingTasks));
+                localStorage.setItem('lastReset', now.toISOString().split('T')[0]);
+            }
+        }
+
+        // Вход админа
+        function loginAsAdmin() {
+            const password = document.getElementById('admin-password').value;
+            if (password === adminPassword) {
+                isAdmin = true;
+                document.getElementById('admin-login').style.display = 'none';
+                document.getElementById('admin-panel').style.display = 'block';
+            } else {
+                alert('Неверный пароль');
+            }
+        }
+
+        // Добавление задания
+        function addTask() {
+            const title = document.getElementById('task-title').value;
+            const taskPoints = parseInt(document.getElementById('task-points').value);
+            if (title && taskPoints > 0) {
+                const id = Date.now().toString();
+                tasks.push({ id, title, points: taskPoints, completed: false, pending: false });
+                localStorage.setItem('tasks', JSON.stringify(tasks));
+                renderTasks();
+                document.getElementById('task-title').value = '';
+                document.getElementById('task-points').value = '';
+            }
+        }
+
+        // Добавление приза
+        function addPrize() {
+            const title = document.getElementById('prize-title').value;
+            const cost = parseInt(document.getElementById('prize-cost').value);
+            if (title && cost > 0) {
+                const id = Date.now().toString();
+                prizes.push({ id, title, cost });
+                localStorage.setItem('prizes', JSON.stringify(prizes));
+                renderPrizes();
+                document.getElementById('prize-title').value = '';
+                document.getElementById('prize-cost').value = '';
+            }
+        }
+
+        // Отправка доказательства
+        function submitTask(index) {
+            const task = tasks[index];
+            if (task.completed || task.pending) return;
+
+            const proofDiv = document.createElement('div');
+            proofDiv.innerHTML = `
+                <textarea id="proof-text-${index}" placeholder="Опишите выполнение"></textarea>
+                <input type="file" id="proof-file-${index}" accept="image/*">
+                <button onclick="sendProof(${index})">Отправить</button>
+            `;
+            document.getElementById(`task-${index}`).appendChild(proofDiv);
+        }
+
+        // Отправка доказательства в Telegram
+        function sendProof(index) {
+            const task = tasks[index];
+            const text = document.getElementById(`proof-text-${index}`).value;
+            const fileInput = document.getElementById(`proof-file-${index}`);
+            let proofData = { text };
+
+            if (fileInput.files.length > 0) {
+                const file = fileInput.files[0];
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    proofData.image = e.target.result; // Data URL
+                    tasks[index].pending = true;
+                    pendingTasks.push({ taskId: task.id, userId: tg.initDataUnsafe.user?.id, proof: proofData });
+                    localStorage.setItem('tasks', JSON.stringify(tasks));
+                    localStorage.setItem('pendingTasks', JSON.stringify(pendingTasks));
+                    tg.sendData(JSON.stringify({
+                        action: 'task_proof',
+                        taskId: task.id,
+                        taskTitle: task.title,
+                        userId: tg.initDataUnsafe.user?.id,
+                        username: tg.initDataUnsafe.user?.username || 'unknown',
+                        proof: proofData
+                    }));
+                    alert('Доказательство отправлено! Ожидайте подтверждения.');
+                    renderTasks();
+                };
+                reader.readAsDataURL(file);
+            } else {
+                tasks[index].pending = true;
+                pendingTasks.push({ taskId: task.id, userId: tg.initDataUnsafe.user?.id, proof: proofData });
+                localStorage.setItem('tasks', JSON.stringify(tasks));
+                localStorage.setItem('pendingTasks', JSON.stringify(pendingTasks));
+                tg.sendData(JSON.stringify({
+                    action: 'task_proof',
+                    taskId: task.id,
+                    taskTitle: task.title,
+                    userId: tg.initDataUnsafe.user?.id,
+                    username: tg.initDataUnsafe.user?.username || 'unknown',
+                    proof: proofData
+                }));
+                alert('Доказательство отправлено! Ожидайте подтверждения.');
+                renderTasks();
+            }
+        }
+
+        // Подтверждение задания (вызывается вручную через бота)
+        window.approveTask = function(taskId, userId) {
+            const taskIndex = tasks.findIndex(t => t.id === taskId);
+            if (taskIndex !== -1 && !tasks[taskIndex].completed) {
+                tasks[taskIndex].completed = true;
+                tasks[taskIndex].pending = false;
+                points += tasks[taskIndex].points;
+                localStorage.setItem('tasks', JSON.stringify(tasks));
+                localStorage.setItem('points', points);
+                const pendingIndex = pendingTasks.findIndex(p => p.taskId === taskId && p.userId === userId);
+                if (pendingIndex !== -1) {
+                    pendingTasks.splice(pendingIndex, 1);
+                    localStorage.setItem('pendingTasks', JSON.stringify(pendingTasks));
+                }
+                renderTasks();
+                document.getElementById('points').textContent = points;
+            }
+        };
+
+        // Покупка приза
+        function buyPrize(index) {
+            if (points >= prizes[index].cost) {
+                points -= prizes[index].cost;
+                localStorage.setItem('points', points);
+                document.getElementById('points').textContent = points;
+                tg.sendData(JSON.stringify({
+                    action: 'prize_bought',
+                    prizeId: prizes[index].id,
+                    prizeTitle: prizes[index].title,
+                    userId: tg.initDataUnsafe.user?.id,
+                    username: tg.initDataUnsafe.user?.username || 'unknown'
+                }));
+                alert(`Приз "${prizes[index].title}" куплен! Свяжитесь с админом.`);
+            } else {
+                alert('Недостаточно баллов');
+            }
+        }
+
+        // Рендеринг заданий
+        function renderTasks() {
+            const taskList = document.getElementById('task-list');
+            taskList.innerHTML = '';
+            tasks.forEach((task, index) => {
+                const div = document.createElement('div');
+                div.className = 'task';
+                div.id = `task-${index}`;
+                div.innerHTML = `
+                    ${task.title} (${task.points} баллов)
+                    ${task.completed ? '<span>✓ Выполнено</span>' : task.pending ? '<span>Ожидает проверки</span>' : `<button onclick="submitTask(${index})">Выполнить</button>`}
+                `;
+                taskList.appendChild(div);
+            });
+        }
+
+        // Рендеринг призов
+        function renderPrizes() {
+            const prizeList = document.getElementById('prize-list');
+            prizeList.innerHTML = '';
+            prizes.forEach((prize, index) => {
+                const div = document.createElement('div');
+                div.className = 'prize';
+                div.innerHTML = `
+                    ${prize.title} (${prize.cost} баллов)
+                    <button onclick="buyPrize(${index})">Купить</button>
+                `;
+                prizeList.appendChild(div);
+            });
+        }
+
+        // Инициализация
+        checkReset();
+        document.getElementById('points').textContent = points;
+        if (tg.initDataUnsafe.user) {
+            document.getElementById('admin-login').style.display = 'block';
+        }
+        renderTasks();
+        renderPrizes();
     </script>
 </body>
 </html>
